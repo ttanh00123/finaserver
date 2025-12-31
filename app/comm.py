@@ -5,7 +5,7 @@ from typing import Optional
 from datetime import date
 import mysql.connector
 from starlette.middleware.wsgi import WSGIMiddleware
-from auth_service import router as auth_router
+from app.auth_service import router as auth_router
 from dotenv import load_dotenv
 import os
 
