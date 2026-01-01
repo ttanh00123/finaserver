@@ -2,4 +2,5 @@ fastapi
 uvicorn
 mysql-connector-python
 python-dotenv
+openai
 pydantic==2.8.0

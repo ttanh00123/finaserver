@@ -1,13 +1,11 @@
 from openai import OpenAI
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 from dotenv import load_dotenv
-import torch
 import os
 
 # Load environment variables from secrets.env
-load_dotenv('secrets.env')
+load_dotenv('.env')
 
 app = FastAPI()
 

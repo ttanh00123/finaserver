@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 import os
 
 # Load environment variables from secrets.env
-load_dotenv('secrets.env')
+load_dotenv('.env')
 
 app = FastAPI()
 
