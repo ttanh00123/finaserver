@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Depends, Body
-from jose import jwt
+from jose import jwt, JWTError
 from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr
 import httpx
@@ -63,6 +63,9 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
 
+class TokenLoginRequest(BaseModel):
+    token: str
+
 # ---- Helpers ----
 
 def _hash_password(password: str) -> str:
@@ -75,6 +78,10 @@ def _create_token(payload: Dict[str, Any]) -> str:
     to_encode = payload.copy()
     to_encode["exp"] = datetime.utcnow() + timedelta(minutes=JWT_EXPIRES_MINUTES)
     return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALG)
+
+
+def _decode_token(token: str) -> Dict[str, Any]:
+    return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
 
 
 def _get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
@@ -181,6 +188,27 @@ async def login(payload: LoginRequest):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     if not _verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    token = _create_token({"sub": str(user["id"]), "email": user["email"]})
+    return TokenResponse(access_token=token)
+
+
+@router.post("/login/token", response_model=TokenResponse)
+async def login_with_token(payload: TokenLoginRequest = Body(...)):
+    try:
+        claims = _decode_token(payload.token)
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    user_id = claims.get("sub")
+    email = claims.get("email")
+    if not user_id or not email:
+        raise HTTPException(status_code=400, detail="Token missing required claims")
+
+    user = _get_user_by_email(email)
+    if not user or str(user.get("id")) != str(user_id):
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Issue a fresh token to refresh expiration while keeping the same subject/email
     token = _create_token({"sub": str(user["id"]), "email": user["email"]})
     return TokenResponse(access_token=token)
 
