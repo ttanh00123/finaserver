@@ -174,6 +174,7 @@ async def generate(request: Request):
         return {"error": "No prompt provided"}
     response = client.chat.completions.create(
     model="meta-llama/Llama-3.2-3B-Instruct:novita",
+    extra_headers={"X-Wait-For-Model": "true"},
     messages=[
         {
             "role": "system", 
