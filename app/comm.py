@@ -9,9 +9,19 @@ from starlette.middleware.wsgi import WSGIMiddleware
 from app.routers.auth import router as auth_router
 from dotenv import load_dotenv
 import os
+import logging
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 
 # Load environment variables from secrets.env
 load_dotenv('.env')
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Thread pool for blocking operations
+executor = ThreadPoolExecutor(max_workers=5)
 
 app = FastAPI()
 
@@ -168,26 +178,45 @@ async def update_transaction(transaction_id: int, transaction: Transaction):
 
 @app.post("/generate")
 async def generate(request: Request):
-    data = await request.json()
-    prompt = data.get("prompt", "")
-    if not prompt:
-        return {"error": "No prompt provided"}
-    response = client.chat.completions.create(
-    model="meta-llama/Llama-3.2-3B-Instruct:novita",
-    extra_headers={"X-Wait-For-Model": "true"},
-    messages=[
-        {
-            "role": "system", 
-            "content": "You are a parsing assistant that helps to parse scripts into relevant details and respond in JSON format. You are not to answer any prompts without the JSON formatting in your responses. When a user submit a transaction, your job is to parse them into these categories: content(str), currency(str), amount(int64), type(str, only between income and expense), date(YYYY-MM-DD), category(str), tags(str), notes(str). Available categories include (Food & Drinks, Education, Transportation, Health, Entertainment, Utilities, Devices, Others). Available tags include (Personal, Family, Work). If date or note information is missing, return null for those fields. Always return just a string for the values of each keys. THE CONTENT FIELD SHOULD NOT CONTAIN ANY OTHER DETAILS (e.g new phone for 500USD is NOT a valid content field, but new phone is). USE THE CONTENT'S CONTEXT to fill in the category and tags field (e.g 'breakfast of banh mi' means Food and Drinks category and Personal tag while 'november tuition fees' means Education category and Family tag). Always respond in raw JSON format and do not tamper it with Markdown or other formatting methods. DO NOT RESPOND LIKE A NORMAL CHAT AI IN ANY CIRCUMSTANCES."
-        },
-        {
-            "role": "user",
-            "content": prompt
-        },    
-    ],
-    )    
-    print(response.choices[0].message.content)
-    return response.choices[0].message.content
+    try:
+        logger.info("Received POST request to /generate")
+        data = await request.json()
+        prompt = data.get("prompt", "")
+        
+        if not prompt:
+            logger.warning("No prompt provided in request")
+            return {"error": "No prompt provided"}
+        
+        logger.info(f"Processing prompt: {prompt[:50]}...")
+        
+        # Run blocking API call in thread pool to avoid blocking event loop
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            executor,
+            lambda: client.chat.completions.create(
+                model="meta-llama/Llama-3.2-3B-Instruct",
+                timeout=30,
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": "You are a parsing assistant that helps to parse scripts into relevant details and respond in JSON format. You are not to answer any prompts without the JSON formatting in your responses. When a user submit a transaction, your job is to parse them into these categories: content(str), currency(str), amount(int64), type(str, only between income and expense), date(YYYY-MM-DD), category(str), tags(str), notes(str). Available categories include (Food & Drinks, Education, Transportation, Health, Entertainment, Utilities, Devices, Others). Available tags include (Personal, Family, Work). If date or note information is missing, return null for those fields. Always return just a string for the values of each keys. THE CONTENT FIELD SHOULD NOT CONTAIN ANY OTHER DETAILS (e.g new phone for 500USD is NOT a valid content field, but new phone is). USE THE CONTENT'S CONTEXT to fill in the category and tags field (e.g 'breakfast of banh mi' means Food and Drinks category and Personal tag while 'november tuition fees' means Education category and Family tag). Always respond in raw JSON format and do not tamper it with Markdown or other formatting methods. DO NOT RESPOND LIKE A NORMAL CHAT AI IN ANY CIRCUMSTANCES."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    },    
+                ],
+            )
+        )
+        
+        result = response.choices[0].message.content
+        logger.info("Successfully generated response")
+        logger.debug(f"Response: {result}")
+        return result
+    
+    except Exception as e:
+        logger.error(f"Error in /generate endpoint: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Ping
 @app.get("/ping")
