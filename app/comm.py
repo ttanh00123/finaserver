@@ -195,7 +195,7 @@ async def generate(request: Request):
         response = await loop.run_in_executor(
             executor,
             lambda: client.chat.completions.create(
-                model="meta-llama/Meta-Llama-3.1-8B-Instruct:hyperbolic",
+                model="meta-llama/Llama-3.2-3B-Instruct:hyperbolic",
                 messages=[
                     {
                         "role": "system", 
