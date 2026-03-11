@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from huggingface_hub import InferenceClient
 
 client = InferenceClient(
-    api_key=os.environ["HF_TOKEN"],
+    api_key=os.environ["AI_APIKEY"],
 )
 
 # Load environment variables from secrets.env
