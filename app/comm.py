@@ -12,6 +12,11 @@ import os
 import logging
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from huggingface_hub import InferenceClient
+
+client = InferenceClient(
+    api_key=os.environ["HF_TOKEN"],
+)
 
 # Load environment variables from secrets.env
 load_dotenv('.env')
@@ -28,10 +33,6 @@ app = FastAPI()
 # Mount auth router
 app.include_router(auth_router)
 
-client = OpenAI(
-    base_url="https://router.huggingface.co/v1",
-    api_key=os.getenv('AI_APIKEY'),
-)
 
 origins = ['*']
 

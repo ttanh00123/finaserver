@@ -8,6 +8,7 @@ passlib==1.7.4
 python-jose==3.5.0
 email-validator==2.3.0
 openai==2.14.0
+huggingface_hub
 
 # Database (nếu dùng MySQL)
 mysql-connector-python==9.5.0
