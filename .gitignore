@@ -2,3 +2,4 @@
 .venv
 venv/
 trungt_notes.txt
+.env.sample
