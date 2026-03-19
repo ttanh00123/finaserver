@@ -9,6 +9,8 @@ from jose import jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr
 import httpx
+
+from app.repositories.user_repository import UserRepository
 # Load environment variables from secrets.env first, then .env
 load_dotenv("secrets.env")
 load_dotenv()
@@ -23,7 +25,8 @@ def get_conn():
         password=os.getenv('DB_PASSWORD'),
     )
 
-# Password hashing (only bcrypt_sha256 to avoid 72-byte limit errors)
+# Password hashing (SHA256)
+# pwd_context = CryptContext(schemes=["sha256_crypt"], deprecated="auto")
 pwd_context = CryptContext(schemes=["bcrypt_sha256"], deprecated="auto")
 
 # JWT
@@ -63,6 +66,12 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
 
+class LoginResultResponse(BaseModel):
+    result: bool
+    user: Dict[str, Any]
+    message: Optional[str] = None
+    token: str
+
 # ---- Helpers ----
 
 def _hash_password(password: str) -> str:
@@ -91,6 +100,24 @@ def _get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
         "id": row[0],
         "email": row[1],
         "password_hash": row[2],
+        "display_name": row[3],
+        "provider": row[4],
+        "provider_id": row[5],
+    }
+
+def _get_user_by_email_password(email, password):
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM users WHERE email = %s AND password_hash = %s",
+        (email, _hash_password(password)),
+    )
+    row = cursor.fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "email": row[1],
         "display_name": row[3],
         "provider": row[4],
         "provider_id": row[5],
@@ -173,16 +200,27 @@ async def signup(payload: SignupRequest):
     token = _create_token({"sub": str(user_id), "email": payload.email})
     return TokenResponse(access_token=token)
 
-
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=LoginResultResponse)
 async def login(payload: LoginRequest):
-    user = _get_user_by_email(payload.email)
-    if not user or not user.get("password_hash"):
+    if not payload.email or not payload.password:
+        raise HTTPException(status_code=400, detail="Email and password are required")
+
+    user = UserRepository.get_by_email_password(
+        payload.email,
+        payload.password,
+    )
+    print(f"Login attempt for {payload.email}, user found: {user is not None}")
+    if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    if not _verify_password(payload.password, user["password_hash"]):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+
     token = _create_token({"sub": str(user["id"]), "email": user["email"]})
-    return TokenResponse(access_token=token)
+    user_response = {
+        "id": user["id"],
+        "email": user["email"],
+        "display_name": user["display_name"],
+        "provider": user["provider"],
+    }
+    return LoginResultResponse(result=True, user=user_response, token=token)
 
 
 # OAuth start endpoints (return the URL the client should open). Real implementation requires client IDs/secrets and redirect URIs.

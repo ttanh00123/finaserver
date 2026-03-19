@@ -6,7 +6,7 @@ from datetime import date
 import mysql.connector
 from openai import OpenAI
 from starlette.middleware.wsgi import WSGIMiddleware
-from app.auth_service import router as auth_router
+from app.routers.auth import router as auth_router
 from dotenv import load_dotenv
 import os
 
