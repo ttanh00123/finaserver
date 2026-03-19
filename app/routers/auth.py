@@ -72,6 +72,19 @@ class LoginResultResponse(BaseModel):
     message: Optional[str] = None
     token: str
 
+class TokenVerifyRequest(BaseModel):
+    token: str
+
+class UserDataResponse(BaseModel):
+    id: int
+    email: str
+    display_name: Optional[str]
+    provider: str
+
+class TokenVerifyResponse(BaseModel):
+    result: bool
+    user: Dict[str, Any]
+
 # ---- Helpers ----
 
 def _hash_password(password: str) -> str:
@@ -96,6 +109,25 @@ def _get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
     cursor.execute(
         "SELECT id, email, password_hash, display_name, provider, provider_id FROM users WHERE email = %s",
         (email,),
+    )
+    row = cursor.fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "email": row[1],
+        "password_hash": row[2],
+        "display_name": row[3],
+        "provider": row[4],
+        "provider_id": row[5],
+    }
+
+def _get_user_by_id(user_id: int) -> Optional[Dict[str, Any]]:
+    conn = get_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, email, password_hash, display_name, provider, provider_id FROM users WHERE id = %s",
+        (user_id,),
     )
     row = cursor.fetchone()
     if not row:
@@ -218,13 +250,49 @@ async def login(payload: LoginRequest):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     token = _create_token({"sub": str(user["id"]), "email": user["email"]})
-    user_response = {
+    user_data = {
         "id": user["id"],
         "email": user["email"],
         "display_name": user["display_name"],
-        "provider": user["provider"],
+        "avatar": user["avatar"],
+        "gender": user["gender"]
     }
-    return LoginResultResponse(result=True, user=user_response, token=token)
+    return LoginResultResponse(result=True, user=user_data, message="Login successful", token=token)
+
+
+@router.post("/login/token", response_model=TokenVerifyResponse)
+async def verify_login_token(payload: TokenVerifyRequest):
+    try:
+        claims = _decode_token(payload.token)
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    user_id_str = claims.get("sub")
+    
+    if not user_id_str:
+        raise HTTPException(status_code=401, detail="Invalid token claims")
+    
+    try:
+        user_id = int(user_id_str)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=401, detail="Invalid user ID in token")
+    
+    # user = _get_user_by_id(user_id)
+    user = UserRepository.get_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    user_data = {
+        "id": user["id"],
+        "email": user["email"],
+        "display_name": user["display_name"],
+        "avatar": user["avatar"],
+        "gender": user["gender"]
+    }
+    
+    return TokenVerifyResponse(result=True, user=user_data)
 
 
 # OAuth start endpoints (return the URL the client should open). Real implementation requires client IDs/secrets and redirect URIs.

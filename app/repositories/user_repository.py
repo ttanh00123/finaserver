@@ -4,8 +4,6 @@ from typing import Optional
 from passlib.context import CryptContext
 from app.db.database import Database
 from app.utils.password import verify_password
-
-
 class UserRepository:
 
     @staticmethod
@@ -21,16 +19,6 @@ class UserRepository:
             "SELECT * FROM users WHERE email = %s",
             (email,),
         )
-
-    # @staticmethod
-    # def get_by_email_password(email: str, password_hash: str) -> Optional[dict]:
-    #     print(f"Fetching user with email: {email} and password_hash: {password_hash}")
-    #     # $bcrypt-sha256$v=2,t=2b,r=12$r7QVqh5EbLPYSmOooRH6q.$/RASCrP6lgeTHLgP8GXcqyZAXrup/KG
-    #     # $5$rounds=535000$taj6qLRSrWa.jSOe$KmMhGTQcoEjMyNT0am6JMgYGRLKXt0G3o/dmZ8Saf62
-    #     return Database.fetch_one(
-    #         "SELECT * FROM users WHERE email = %s AND password_hash = %s",
-    #         (email, password_hash),
-    #     )
 
     @staticmethod
     def get_by_email_password(email: str, password: str) -> Optional[dict]:
