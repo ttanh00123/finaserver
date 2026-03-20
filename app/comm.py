@@ -7,6 +7,7 @@ import mysql.connector
 from openai import OpenAI
 from starlette.middleware.wsgi import WSGIMiddleware
 from app.routers.auth import router as auth_router
+from app.routers.transaction import router as transaction_router
 from dotenv import load_dotenv
 import os
 import logging
@@ -15,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from huggingface_hub import InferenceClient
 
 client = InferenceClient(
-    api_key=os.environ["AI_APIKEY"],
+    api_key=os.environ["AI_API_KEY"],
 )
 
 # Load environment variables from secrets.env
@@ -32,6 +33,7 @@ app = FastAPI()
 
 # Mount auth router
 app.include_router(auth_router)
+app.include_router(transaction_router)
 
 
 origins = ['*']
@@ -176,13 +178,13 @@ async def update_transaction(transaction_id: int, transaction: Transaction):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @app.post("/generate")
 async def generate(request: Request):
     try:
         logger.info("Received POST request to /generate")
         data = await request.json()
         prompt = data.get("prompt", "")
+        userId = data.get("user_id", "")
         
         if not prompt:
             logger.warning("No prompt provided in request")
@@ -209,10 +211,9 @@ async def generate(request: Request):
             )
         )
         
-        result = response.choices[0].message.content
-        logger.info("Successfully generated response")
-        logger.debug(f"Response: {result}")
-        return result
+        content = response.choices[0].message.content
+        logger.debug("Raw LLM response: %s", content)
+        return content
     
     except Exception as e:
         logger.error(f"Error in /generate endpoint: {str(e)}", exc_info=True)

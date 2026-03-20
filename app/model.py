@@ -21,7 +21,7 @@ app.add_middleware(
 
 client = OpenAI(
     base_url="https://router.huggingface.co/v1",
-    api_key=os.getenv('AI_APIKEY'),
+    api_key=os.getenv('AI_API_KEY'),
 )
 
 

@@ -1,4 +1,5 @@
 import os
+from fastapi.security import HTTPBearer
 import mysql.connector
 import secrets
 from datetime import datetime, timedelta
@@ -35,6 +36,13 @@ JWT_EXPIRES_MINUTES = int(os.getenv("AUTH_JWT_EXPIRES_MINUTES", "60"))
 JWT_ALG = "HS256"
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+def decode_access_token(token: str) -> dict | None:
+    try:
+        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
+    except JWTError:
+        return None
+
 
 # ---- Models ----
 
