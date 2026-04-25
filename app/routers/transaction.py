@@ -6,7 +6,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, Depends, Body
 
 from app.ai_service import parse_transaction
-from app.routers.auth import decode_access_token
+from app.middleware.auth import decode_access_token
 
 router = APIRouter(prefix="/transaction", tags=["transaction"])
 bearer_scheme = HTTPBearer()

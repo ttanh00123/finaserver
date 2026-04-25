@@ -56,3 +56,10 @@ def get_current_payload(
         payload: dict = Depends(get_current_payload)
     """
     return decode_token(credentials.credentials)
+
+def decode_access_token(token: str) -> dict | None:
+    """Trả về None thay vì raise exception — dùng cho optional auth."""
+    try:
+        return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        return None
