@@ -1,4 +1,4 @@
-# app/services/initialize_service.py
+# app/repositories/initialize_service.py
 
 from app.db.database import Database
 from app.repositories.category_repository import CategoryRepository

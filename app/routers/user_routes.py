@@ -11,6 +11,8 @@ from app.db.database import Database
 from app.middleware.auth import get_current_user_id
 from app.repositories.category_repository import CategoryRepository
 from app.repositories.wallet_repository import WalletRepository
+from app.services.initialize_service import InitializeService
+
 
 router             = APIRouter(prefix="/users",       tags=["users"])
 master_data_router = APIRouter(prefix="/master-data", tags=["master-data"])
