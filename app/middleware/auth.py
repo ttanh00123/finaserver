@@ -8,7 +8,7 @@ import os
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "change-me-in-production")
+SECRET_KEY = os.getenv("AUTH_JWT_SECRET", "change-me-in-production")
 ALGORITHM  = os.getenv("JWT_ALGORITHM", "HS256")
 
 _bearer = HTTPBearer()

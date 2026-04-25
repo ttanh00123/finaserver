@@ -1,9 +1,14 @@
-# db/database.py
-from contextlib import contextmanager
+# app/db/database.py
+
 import os
+from contextlib import contextmanager
 from typing import Any, Optional
 import mysql.connector
 from mysql.connector.pooling import MySQLConnectionPool
+from dotenv import load_dotenv
+
+load_dotenv("secrets.env")
+load_dotenv()
 
 
 class Database:
@@ -15,11 +20,11 @@ class Database:
             cls._pool = MySQLConnectionPool(
                 pool_name="main_pool",
                 pool_size=10,
-                host=os.getenv('DB_SERVER'),
-                port=int(os.getenv('DB_PORT', 3306)),
-                database=os.getenv('DB_DATABASE'),
-                user=os.getenv('DB_USERNAME'),
-                password=os.getenv('DB_PASSWORD'),
+                host=os.getenv("DB_SERVER"),
+                port=int(os.getenv("DB_PORT", 3306)),
+                database=os.getenv("DB_DATABASE"),
+                user=os.getenv("DB_USERNAME"),
+                password=os.getenv("DB_PASSWORD"),
                 charset="utf8mb4",
                 autocommit=False,
             )
@@ -40,14 +45,11 @@ class Database:
 
     @classmethod
     def _row_to_dict(cls, cursor, row: tuple) -> dict[str, Any]:
-        """Tự động map field name từ cursor.description của MySQL"""
         columns = [col[0] for col in cursor.description]
         return dict(zip(columns, row))
 
     @classmethod
-    def fetch_one(
-        cls, sql: str, params: tuple = ()
-    ) -> Optional[dict[str, Any]]:
+    def fetch_one(cls, sql: str, params: tuple = ()) -> Optional[dict[str, Any]]:
         with cls._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(sql, params)
@@ -57,9 +59,7 @@ class Database:
             return cls._row_to_dict(cursor, row)
 
     @classmethod
-    def fetch_all(
-        cls, sql: str, params: tuple = ()
-    ) -> list[dict[str, Any]]:
+    def fetch_all(cls, sql: str, params: tuple = ()) -> list[dict[str, Any]]:
         with cls._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(sql, params)
@@ -67,19 +67,14 @@ class Database:
             return [cls._row_to_dict(cursor, row) for row in rows]
 
     @classmethod
-    def execute(
-        cls, sql: str, params: tuple = ()
-    ) -> int:
-        """Insert/Update/Delete — trả về lastrowid hoặc rowcount"""
+    def execute(cls, sql: str, params: tuple = ()) -> int:
         with cls._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(sql, params)
             return cursor.lastrowid or cursor.rowcount
 
     @classmethod
-    def execute_many(
-        cls, sql: str, params_list: list[tuple]
-    ) -> int:
+    def execute_many(cls, sql: str, params_list: list[tuple]) -> int:
         with cls._get_connection() as conn:
             cursor = conn.cursor()
             cursor.executemany(sql, params_list)

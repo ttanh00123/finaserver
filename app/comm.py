@@ -1,227 +1,198 @@
+# app/comm.py
+# get_conn() đã được xóa — dùng Database class từ app.db.database thay thế
+
+import asyncio
+import logging
+import os
+from concurrent.futures import ThreadPoolExecutor
+
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from huggingface_hub import InferenceClient
 from pydantic import BaseModel
 from typing import Optional
 from datetime import date
-import mysql.connector
-from openai import OpenAI
-from starlette.middleware.wsgi import WSGIMiddleware
-from app.routers.user_routes import router as user_routers, master_data_router
+
+from app.db.database import Database
 from app.routers.auth import router as auth_router
 from app.routers.transaction import router as transaction_router
-from dotenv import load_dotenv
-import os
-import logging
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
-from huggingface_hub import InferenceClient
+from app.routers.user_routes import router as user_router, master_data_router
 
-client = InferenceClient(
-    api_key=os.environ["AI_API_KEY"],
-)
+load_dotenv("secrets.env")
+load_dotenv()
 
-# Load environment variables from secrets.env
-load_dotenv('.env')
-
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Thread pool for blocking operations
 executor = ThreadPoolExecutor(max_workers=5)
+
+client = InferenceClient(api_key=os.environ["AI_API_KEY"])
 
 app = FastAPI(title="FinA API")
 
-# Mount auth router
-app.include_router(auth_router)
-app.include_router(transaction_router)
-app.include_router(user_routers)
-app.include_router(master_data_router)
-
-origins = ['*']
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Database connection
-def get_conn():
-    return mysql.connector.connect(
-        host=os.getenv('DB_SERVER'),
-        port=int(os.getenv('DB_PORT', 3306)),
-        database=os.getenv('DB_DATABASE'),
-        user=os.getenv('DB_USERNAME'),
-        password=os.getenv('DB_PASSWORD'),
-    )
+# ── Routers ────────────────────────────────────────────────────────────────────
 
+app.include_router(auth_router)
+app.include_router(transaction_router)
+app.include_router(user_router)
+app.include_router(master_data_router)
+
+
+# ── Legacy endpoints (dùng Database thay get_conn) ─────────────────────────────
+# TODO: migrate sang TransactionRepository sau
 
 class Transaction(BaseModel):
-    content: str
+    content:  str
     currency: str
-    amount: float
-    type: str
-    date: Optional[str] = None
+    amount:   float
+    type:     str
+    date:     Optional[str] = None
     category: str
-    tags: str
-    notes: Optional[str] = None
-    user_id: int
+    tags:     str
+    notes:    Optional[str] = None
+    user_id:  int
+
 
 @app.post("/addTransaction")
 async def add_transaction(transaction: Transaction):
     try:
-        conn = get_conn()
-        cursor = conn.cursor()
-        # Fill optional fields with defaults if missing
-        tx_date = transaction.date
-        if not tx_date:
+        tx_date  = transaction.date or date.today().isoformat()
+        if tx_date == "null":
             tx_date = date.today().isoformat()
-        if tx_date == 'null':
-            tx_date = date.today().isoformat()
-        tx_notes = transaction.notes
-        if tx_notes is None:
-            tx_notes = 'None'
+        tx_notes = transaction.notes or "None"
 
-        print(transaction)
-        cursor.execute('''
-            INSERT INTO transactions (content, currency, amount, type, date, category, tags, notes, userid)
+        Database.execute(
+            """
+            INSERT INTO transactions (content, currency, amount, type, date_time, category_id, tags, notes, userid)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ''', (transaction.content, transaction.currency, transaction.amount, transaction.type, tx_date, transaction.category, transaction.tags, tx_notes, transaction.user_id))
-        conn.commit()
-        conn.close()
+            """,
+            (transaction.content, transaction.currency, transaction.amount,
+             transaction.type, tx_date, transaction.category,
+             transaction.tags, tx_notes, transaction.user_id),
+        )
         return {"message": "Transaction added successfully"}
-    
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/transactions")
 async def get_transactions(user_id: int):
     try:
-        conn = get_conn()
-        cursor = conn.cursor()
-        print(user_id)
-        cursor.execute('SELECT * FROM transactions WHERE userid = %s', (user_id,))
-        rows = cursor.fetchall()
-        transactions = []
-        for row in rows:
-            transactions.append({
-                "id": row[0],
-                "content": row[1],
-                "currency": row[2],
-                "amount": row[3],
-                "type": row[4],
-                "date": row[5],
-                "category": row[6],
-                "tags": row[7],
-                "notes": row[8],
-                "user_id": row[9] if len(row) > 9 else None
-            })
-        conn.close()
-        return transactions
+        rows = Database.fetch_all(
+            "SELECT * FROM transactions WHERE userid = %s",
+            (user_id,),
+        )
+        return rows
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# Delete function to remove selected transaction
+
 @app.delete("/deleteTransaction/{transaction_id}")
 async def delete_transaction(transaction_id: int):
     try:
-        conn = get_conn()
-        cursor = conn.cursor()
-        cursor.execute('DELETE FROM transactions WHERE id = %s', (transaction_id,))
-        conn.commit()
-        if cursor.rowcount == 0:
-            conn.close()
+        affected = Database.execute(
+            "DELETE FROM transactions WHERE id = %s",
+            (transaction_id,),
+        )
+        if not affected:
             raise HTTPException(status_code=404, detail="Transaction not found")
-        conn.close()
         return {"message": "Transaction deleted successfully"}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# Update function to modify existing transaction
+
 @app.put("/updateTransaction/{transaction_id}")
 async def update_transaction(transaction_id: int, transaction: Transaction):
     try:
-        conn = get_conn()
-        cursor = conn.cursor()
-        
-        # Check if transaction exists
-        cursor.execute('SELECT id FROM transactions WHERE id = %s', (transaction_id,))
-        if not cursor.fetchone():
-            conn.close()
+        existing = Database.fetch_one(
+            "SELECT id FROM transactions WHERE id = %s", (transaction_id,)
+        )
+        if not existing:
             raise HTTPException(status_code=404, detail="Transaction not found")
-        
-        # Optional fields filter
-        tx_date = transaction.date
-        if not tx_date:
+
+        tx_date  = transaction.date or date.today().isoformat()
+        if tx_date == "null":
             tx_date = date.today().isoformat()
-        if tx_date == 'null':
-            tx_date = date.today().isoformat()
-        
-        tx_notes = transaction.notes
-        if tx_notes is None:
-            tx_notes = 'None'
-        
-        cursor.execute('''
+        tx_notes = transaction.notes or "None"
+
+        Database.execute(
+            """
             UPDATE transactions
-            SET content = %s, currency = %s, amount = %s, type = %s, date = %s, category = %s, tags = %s, notes = %s
-            WHERE id = %s
-        ''', (transaction.content, transaction.currency, transaction.amount, transaction.type, tx_date, transaction.category, transaction.tags, tx_notes, transaction_id))
-        conn.commit()
-        conn.close()
-        
+            SET content=%s, currency=%s, amount=%s, type=%s,
+                date_time=%s, category_id=%s, tags=%s, notes=%s
+            WHERE id=%s
+            """,
+            (transaction.content, transaction.currency, transaction.amount,
+             transaction.type, tx_date, transaction.category,
+             transaction.tags, tx_notes, transaction_id),
+        )
         return {"message": "Transaction updated successfully"}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# ── AI generate ────────────────────────────────────────────────────────────────
+
+SYSTEM_PROMPT = (
+    "You are a parsing assistant that helps to parse scripts into relevant details "
+    "and respond in JSON format. You are not to answer any prompts without the JSON "
+    "formatting in your responses. When a user submits a transaction, your job is to "
+    "parse them into these categories: content(str), currency(str), amount(int64), "
+    "type(str, only between income and expense), date(YYYY-MM-DD), "
+    "master_category_id(int), tags(str), notes(str). "
+    "master_category_id must be an integer from the MASTER EXPENSE/INCOME list. "
+    "MASTER INCOME: 1=Salary,2=Bonus,3=Allowance,4=Business,5=Investment,"
+    "6=Passive Income,7=Gift,8=Other Income. "
+    "MASTER EXPENSE: 9=Food & Drink,10=Transport,11=Phone,12=Internet,13=Fuel,"
+    "14=Groceries,15=Clothing,16=Beauty,17=Entertainment,18=Travel,"
+    "19=Family Support,20=Events & Gifts,21=Medical,22=Medicine,23=Fitness,"
+    "24=Fund,25=Repair,26=Accident,27=Fine & Fee,28=Rent,29=Electricity,"
+    "30=Water,31=Education,32=Insurance,33=Installment. "
+    "If date or note information is missing, return null. "
+    "Always respond in raw JSON format, no markdown."
+)
+
+
 @app.post("/generate")
 async def generate(request: Request):
     try:
-        logger.info("Received POST request to /generate")
-        data = await request.json()
-        prompt = data.get("prompt", "")
-        userId = data.get("user_id", "")
-        
+        data    = await request.json()
+        prompt  = data.get("prompt", "")
         if not prompt:
-            logger.warning("No prompt provided in request")
             return {"error": "No prompt provided"}
-        
-        logger.info(f"Processing prompt: {prompt[:50]}...")
-        
-        # Run blocking API call in thread pool to avoid blocking event loop
-        loop = asyncio.get_event_loop()
+
+        loop     = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             executor,
             lambda: client.chat.completions.create(
                 model="meta-llama/Llama-3.1-8B-Instruct:novita",
                 messages=[
-                    {
-                        "role": "system", 
-                        "content": "You are a parsing assistant that helps to parse scripts into relevant details and respond in JSON format. You are not to answer any prompts without the JSON formatting in your responses. When a user submit a transaction, your job is to parse them into these categories: content(str), currency(str), amount(int64), type(str, only between income and expense), date(YYYY-MM-DD), category(str), tags(str), notes(str). Available categories include (Food & Drinks, Education, Transportation, Health, Entertainment, Utilities, Devices, Others). Available tags include (Personal, Family, Work). If date or note information is missing, return null for those fields. Always return just a string for the values of each keys. THE CONTENT FIELD SHOULD NOT CONTAIN ANY OTHER DETAILS (e.g new phone for 500USD is NOT a valid content field, but new phone is). USE THE CONTENT'S CONTEXT to fill in the category and tags field (e.g 'breakfast of banh mi' means Food and Drinks category and Personal tag while 'november tuition fees' means Education category and Family tag). Tag field can not be null. Always respond in raw JSON format and do not tamper it with Markdown or other formatting methods. DO NOT RESPOND LIKE A NORMAL CHAT AI IN ANY CIRCUMSTANCES."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    },    
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user",   "content": prompt},
                 ],
-            )
+            ),
         )
-        
-        content = response.choices[0].message.content
-        logger.debug("Raw LLM response: %s", content)
-        return content
-    
+        return response.choices[0].message.content
     except Exception as e:
-        logger.error(f"Error in /generate endpoint: {str(e)}", exc_info=True)
+        logger.error(f"Error in /generate: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-# Ping
+
+# ── Health ─────────────────────────────────────────────────────────────────────
+
 @app.get("/ping")
 async def health_check():
     return {"status": "healthy"}
@@ -229,4 +200,3 @@ async def health_check():
 @app.get("/")
 async def read_root():
     return {"message": "Welcome to the FinA Transactions API"}
-
