@@ -71,6 +71,8 @@ class OTPVerifyRequest(BaseModel):
     new_password: Optional[str] = None
 
 class TokenResponse(BaseModel):
+    user_id: int = None
+    status: int = 0
     access_token: str
     token_type: str = "bearer"
 
@@ -168,16 +170,16 @@ def _get_user_by_email_password(email, password):
     }
 
 
-def _insert_user(email: str, password_hash: Optional[str], display_name: Optional[str], provider: str, provider_id: Optional[str]) -> int:
+def _insert_user(email: str, password_hash: Optional[str], display_name: Optional[str], provider: str, provider_id: Optional[str], status: int = 0) -> int:
     conn = get_conn()
     cursor = conn.cursor()
     # Return new primary key to use as token subject
     cursor.execute(
         """
-        INSERT INTO users (email, password_hash, display_name, provider, provider_id)
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO users (email, password_hash, display_name, provider, provider_id, status)
+        VALUES (%s, %s, %s, %s, %s, %s)
         """,
-        (email, password_hash, display_name, provider, provider_id),
+        (email, password_hash, display_name, provider, provider_id, status),
     )
     new_id = cursor.lastrowid
     conn.commit()
@@ -242,7 +244,7 @@ async def signup(payload: SignupRequest):
     password_hash = _hash_password(payload.password)
     user_id = _insert_user(payload.email, password_hash, payload.display_name, provider="local", provider_id=None)
     token = _create_token({"sub": str(user_id), "email": payload.email})
-    return TokenResponse(access_token=token)
+    return TokenResponse(user_id=user_id, access_token=token, status=0)
 
 @router.post("/login", response_model=LoginResultResponse)
 async def login(payload: LoginRequest):

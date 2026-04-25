@@ -1,0 +1,52 @@
+# app/repositories/wallet_repository.py
+
+from typing import Optional
+from app.db.database import Database
+
+
+class WalletRepository:
+
+    @staticmethod
+    def get_by_id(wallet_id: int) -> Optional[dict]:
+        return Database.fetch_one(
+            "SELECT * FROM wallets WHERE id = %s",
+            (wallet_id,),
+        )
+
+    @staticmethod
+    def get_by_user(user_id: int) -> list[dict]:
+        return Database.fetch_all(
+            """
+            SELECT * FROM wallets
+            WHERE userid = %s AND status = 1
+            ORDER BY sort_order
+            """,
+            (user_id,),
+        )
+
+    @staticmethod
+    def create(
+        user_id: int,
+        name: str,
+        wallet_type: str,
+        currency: str,
+        color: str = "#1D9E75",
+        balance: float = 0.0,
+        sort_order: int = 0,
+    ) -> int:
+        return Database.execute(
+            """
+            INSERT INTO wallets
+                (userid, name, wallet_type, currency, balance, color, status, sort_order)
+            VALUES (%s, %s, %s, %s, %s, %s, 1, %s)
+            """,
+            (user_id, name, wallet_type, currency, balance, color, sort_order),
+        )
+
+    @staticmethod
+    def has_wallets(user_id: int) -> bool:
+        row = Database.fetch_one(
+            "SELECT COUNT(*) AS cnt FROM wallets WHERE userid = %s AND status = 1",
+            (user_id,),
+        )
+        return (row["cnt"] if row else 0) > 0

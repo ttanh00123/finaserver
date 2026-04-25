@@ -6,6 +6,7 @@ from datetime import date
 import mysql.connector
 from openai import OpenAI
 from starlette.middleware.wsgi import WSGIMiddleware
+from app.routers import user_router, master_data_router
 from app.routers.auth import router as auth_router
 from app.routers.transaction import router as transaction_router
 from dotenv import load_dotenv
@@ -29,12 +30,13 @@ logger = logging.getLogger(__name__)
 # Thread pool for blocking operations
 executor = ThreadPoolExecutor(max_workers=5)
 
-app = FastAPI()
+app = FastAPI(title="FinA API")
 
 # Mount auth router
 app.include_router(auth_router)
 app.include_router(transaction_router)
-
+app.include_router(user_router)
+app.include_router(master_data_router)
 
 origins = ['*']
 
