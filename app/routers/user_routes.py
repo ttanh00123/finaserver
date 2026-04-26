@@ -52,21 +52,17 @@ async def initialize(
 
     return {"status": "ok"}
 
+# app/routers/user_routes.py
 
 @master_data_router.get("/sync")
 async def sync_master_data(
     client_md5: Optional[str] = Query(default=None),
+    locale:     str           = Query(default="vi"),   # thêm param locale
     user_id:    int           = Depends(get_current_user_id),
 ):
-    """
-    So sánh MD5 client vs server.
-    - Khớp  → { changed: false }
-    - Khác  → { changed: true, md5, data: { wallets, categories } }
-    """
-    data       = _build_master_data(user_id)
+    data       = _build_master_data(user_id, locale)
     server_md5 = _compute_md5(data)
 
-    # Upsert hash để debug/monitor
     Database.execute(
         """
         INSERT INTO user_master_data_hash (userid, md5_hash)
@@ -82,13 +78,76 @@ async def sync_master_data(
     return {"changed": True, "md5": server_md5, "data": data}
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _build_master_data(user_id: int) -> dict:
+def _build_master_data(user_id: int, locale: str = "vi") -> dict:
     return {
         "wallets":    _serialize_wallets(WalletRepository.get_by_user(user_id)),
-        "categories": _serialize_categories(CategoryRepository.get_by_user(user_id)),
+        "categories": _serialize_master_categories(locale),  # dùng master
     }
+
+
+def _serialize_master_categories(locale: str) -> list[dict]:
+    rows = Database.fetch_all(
+        """
+        SELECT
+            mc.id,
+            mc.icon,
+            mc.type,
+            mc.sort_order,
+            COALESCE(
+                (SELECT name FROM master_category_translations
+                 WHERE category_id = mc.id AND locale = %s),
+                (SELECT name FROM master_category_translations
+                 WHERE category_id = mc.id AND locale = 'en')
+            ) AS name
+        FROM master_categories mc
+        ORDER BY mc.type, mc.sort_order
+        """,
+        (locale,),
+    )
+    return [{
+        "id":         r["id"],
+        "name":       r["name"],
+        "icon":       r["icon"],
+        "type":       r["type"],
+        "sort_order": r["sort_order"],
+    } for r in rows]
+
+# @master_data_router.get("/sync")
+# async def sync_master_data(
+#     client_md5: Optional[str] = Query(default=None),
+#     user_id:    int           = Depends(get_current_user_id),
+# ):
+#     """
+#     So sánh MD5 client vs server.
+#     - Khớp  → { changed: false }
+#     - Khác  → { changed: true, md5, data: { wallets, categories } }
+#     """
+#     data       = _build_master_data(user_id)
+#     server_md5 = _compute_md5(data)
+
+#     # Upsert hash để debug/monitor
+#     Database.execute(
+#         """
+#         INSERT INTO user_master_data_hash (userid, md5_hash)
+#         VALUES (%s, %s)
+#         ON DUPLICATE KEY UPDATE md5_hash = VALUES(md5_hash), updated_at = NOW()
+#         """,
+#         (user_id, server_md5),
+#     )
+
+#     if client_md5 == server_md5:
+#         return {"changed": False, "md5": server_md5}
+
+#     return {"changed": True, "md5": server_md5, "data": data}
+
+
+# # ── Helpers ───────────────────────────────────────────────────────────────────
+
+# def _build_master_data(user_id: int) -> dict:
+#     return {
+#         "wallets":    _serialize_wallets(WalletRepository.get_by_user(user_id)),
+#         "categories": _serialize_categories(CategoryRepository.get_by_user(user_id)),
+#     }
 
 
 def _serialize_wallets(wallets: list[dict]) -> list[dict]:
@@ -110,16 +169,16 @@ def _serialize_wallets(wallets: list[dict]) -> list[dict]:
     } for w in wallets]
 
 
-def _serialize_categories(categories: list[dict]) -> list[dict]:
-    return [{
-        "id":         c["id"],
-        "userid":     c["userid"],
-        "name":       c["name"],
-        "icon":       c["icon"],
-        "type":       c["type"],
-        "sort_order": c["sort_order"],
-        "master_id":  c.get("master_id"),
-    } for c in categories]
+# def _serialize_categories(categories: list[dict]) -> list[dict]:
+#     return [{
+#         "id":         c["id"],
+#         "userid":     c["userid"],
+#         "name":       c["name"],
+#         "icon":       c["icon"],
+#         "type":       c["type"],
+#         "sort_order": c["sort_order"],
+#         "master_id":  c.get("master_id"),
+#     } for c in categories]
 
 
 def _compute_md5(data: dict) -> str:
