@@ -4,7 +4,7 @@ import uuid
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from pydantic import BaseModel
 
 from app.ai_service import parse_transaction
@@ -126,35 +126,49 @@ async def get_transactions(
     from_date:   Optional[str] = Query(default=None),
     to_date:     Optional[str] = Query(default=None),
     user_id:     int           = Depends(get_current_user_id),
+    accept_language: str = Header(default="vi"),
 ):
-    conditions = ["userid = %s"]
+    locale = accept_language.split(",")[0].split("-")[0]  # Lấy phần đầu của header (ví dụ: "en-US" → "en")
+    conditions = ["t.userid = %s"]
     params     = [user_id]
 
-    if type        is not None: conditions.append("type = %s");        params.append(type)
-    if wallet_id   is not None: conditions.append("wallet_id = %s");   params.append(wallet_id)
-    if category_id is not None: conditions.append("category_id = %s"); params.append(category_id)
-    if from_date:               conditions.append("date_time >= %s");  params.append(from_date)
-    if to_date:                 conditions.append("date_time <= %s");  params.append(to_date)
+    if type        is not None: conditions.append("t.type = %s");        params.append(type)
+    if wallet_id   is not None: conditions.append("t.wallet_id = %s");   params.append(wallet_id)
+    if category_id is not None: conditions.append("t.category_id = %s"); params.append(category_id)
+    if from_date:               conditions.append("t.date_time >= %s");  params.append(from_date)
+    if to_date:                 conditions.append("t.date_time <= %s");  params.append(to_date)
 
     where = " AND ".join(conditions)
     params += [limit, offset]
 
     rows = Database.fetch_all(
-        f"""
-        SELECT
-            t.id, t.type, t.wallet_id, t.to_wallet_id,
-            t.amount, t.receive_amount, t.currency,
-            t.category_id, t.content, t.notes,
-            t.date_time, t.tags, t.status,
-            w.name AS wallet_name, w.color AS wallet_color,
-            w.wallet_type
-        FROM transactions t
-        LEFT JOIN wallets w ON t.wallet_id = w.id
-        WHERE {where}
-        ORDER BY t.date_time DESC
-        LIMIT %s OFFSET %s
-        """,
-        tuple(params),
+    f"""
+      SELECT
+          t.id, t.type, t.wallet_id, t.to_wallet_id,
+          t.amount, t.receive_amount, t.currency,
+          t.category_id, t.content, t.notes,
+          t.date_time, t.tags, t.status,
+
+          w.name AS wallet_name,
+          w.color AS wallet_color,
+          w.wallet_type,
+
+          ct.name AS category_name
+
+      FROM transactions t
+      LEFT JOIN wallets w ON t.wallet_id = w.id
+      LEFT JOIN master_categories c ON t.category_id = c.id
+
+      LEFT JOIN master_category_translations ct
+          ON ct.category_id = c.id
+          AND ct.locale = %s
+
+      WHERE {where}
+      ORDER BY t.date_time DESC
+      LIMIT %s OFFSET %s
+      """,
+      tuple([locale] + params),
+
     )
 
     return [_serialize_transaction(r) for r in rows]
@@ -167,6 +181,7 @@ async def get_transaction(
     tx_id:   int,
     user_id: int = Depends(get_current_user_id),
 ):
+    
     row = Database.fetch_one(
         """
         SELECT
@@ -285,24 +300,24 @@ async def process_prompt(
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _serialize_transaction(r: dict) -> dict:
+def _serialize_transaction(r):
     return {
-        "id":             r["id"],
-        "type":           r["type"],
-        "wallet_id":      r["wallet_id"],
-        "wallet_name":    r.get("wallet_name"),
-        "wallet_color":   r.get("wallet_color"),
-        "wallet_type":    r.get("wallet_type"),
-        "to_wallet_id":   r.get("to_wallet_id"),
-        "amount":         float(r["amount"]),
-        "receive_amount": float(r["receive_amount"]) if r.get("receive_amount") else None,
-        "currency":       r["currency"],
-        "category_id":    r.get("category_id"),
-        "content":        r.get("content"),
-        "notes":          r.get("notes"),
-        "date_time":      r["date_time"].isoformat() if r.get("date_time") else None,
-        "tags":           r.get("tags"),
-        "status":         r.get("status", 0),
+        "id": r["id"],
+        "type": "expense" if r["type"] == 0 else "income",
+
+        "amount": float(r["amount"]),
+        "currency": r["currency"],
+
+        "category": r["category_name"],
+        "wallet": r["wallet_name"],
+
+        "address": r["content"],
+        "note": r["notes"],
+
+        "date_time": r["date_time"].isoformat(),
+
+        "wallet_color": r["wallet_color"],
+        "wallet_type": r["wallet_type"],
     }
 
 
