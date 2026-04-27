@@ -19,6 +19,7 @@ from app.routers.auth import router as auth_router
 from app.routers.transaction import router as transaction_router
 from app.routers.user_routes import router as user_router, master_data_router
 from app.routers.wallet import router as wallet_router
+from app.routers.dashboard import router as dashboard_router
 
 load_dotenv("secrets.env")
 load_dotenv()
@@ -47,6 +48,7 @@ app.include_router(transaction_router)
 app.include_router(user_router)
 app.include_router(master_data_router)
 app.include_router(wallet_router)
+app.include_router(dashboard_router)
 
 
 # ── Legacy endpoints (dùng Database thay get_conn) ─────────────────────────────
