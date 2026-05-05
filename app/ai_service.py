@@ -36,53 +36,100 @@ VALID_TYPES = {"income", "expense"}
 
 # ── System prompt (matches your exact schema) ─────────────────────────────────
 
-SYSTEM_PROMPT = (
-    "You are a parsing assistant that helps to parse scripts into relevant details "
-    "and respond in JSON format. You are not to answer any prompts without the JSON "
-    "formatting in your responses. When a user submits a transaction, your job is to "
-    "parse them into these categories: content(str), currency(str), amount(int64), "
-    "type(str, only between income and expense), date(YYYY-MM-DD), category(str), "
-    "tags(str), notes(str). "
-    "Available categories include (Food & Drinks, Education, Transportation, Health, "
-    "Entertainment, Utilities, Devices, Others). "
-    "Available tags include (Personal, Family, Work). "
-    "If date or note information is missing, return null for those fields. "
-    "Always return just a string for the values of each key. "
-    "THE CONTENT FIELD SHOULD NOT CONTAIN ANY OTHER DETAILS "
-    "(e.g 'new phone for 500USD' is NOT a valid content field, but 'new phone' IS). "
-    "USE THE CONTENT'S CONTEXT to fill in the category and tags field "
-    "(e.g 'breakfast of banh mi' means Food and Drinks category and Personal tag "
-    "while 'november tuition fees' means Education category and Family tag). "
-    "Tag field can not be null. "
-    "Always respond in raw JSON format and do not tamper it with Markdown or other "
-    "formatting methods. "
-    "DO NOT RESPOND LIKE A NORMAL CHAT AI IN ANY CIRCUMSTANCES."
-)
+# SYSTEM_PROMPT = (
+#     "You are a parsing assistant that helps to parse scripts into relevant details "
+#     "and respond in JSON format. You are not to answer any prompts without the JSON "
+#     "formatting in your responses. When a user submits a transaction, your job is to "
+#     "parse them into these categories: content(str), currency(str), amount(int64), "
+#     "type(str, only between income and expense), date(YYYY-MM-DD), category(str), "
+#     "tags(str), notes(str). "
+#     "Available categories include (Food & Drinks, Education, Transportation, Health, "
+#     "Entertainment, Utilities, Devices, Others). "
+#     "Available tags include (Personal, Family, Work). "
+#     "If date or note information is missing, return null for those fields. "
+#     "Always return just a string for the values of each key. "
+#     "THE CONTENT FIELD SHOULD NOT CONTAIN ANY OTHER DETAILS "
+#     "(e.g 'new phone for 500USD' is NOT a valid content field, but 'new phone' IS). "
+#     "USE THE CONTENT'S CONTEXT to fill in the category and tags field "
+#     "(e.g 'breakfast of banh mi' means Food and Drinks category and Personal tag "
+#     "while 'november tuition fees' means Education category and Family tag). "
+#     "Tag field can not be null. "
+#     "Always respond in raw JSON format and do not tamper it with Markdown or other "
+#     "formatting methods. "
+#     "DO NOT RESPOND LIKE A NORMAL CHAT AI IN ANY CIRCUMSTANCES."
+# )
+
+# Danh sách mapping để AI tham chiếu (đã tối ưu hóa cho prompt)
+# Type 1: Income, Type 0: Expense
+CATEGORY_MAPPING = """
+INCOME (type:1):
+1: Salary/Lương, 2: Bonus/Thưởng, 3: Allowance/Phụ cấp, 4: Business/Kinh doanh, 
+5: Investment/Đầu tư, 6: Passive Income/Thu nhập thụ động, 7: Gift/Quà tặng, 8: Other Income/Thu khác, 35: Other/Khác
+
+EXPENSE (type:0):
+9: Food & Drink/Ăn uống, 10: Transport/Đi lại, 11: Phone/Điện thoại, 12: Internet, 
+13: Fuel/Xăng dầu, 14: Groceries/Nhu yếu phẩm, 15: Clothing/Trang phục, 16: Beauty/Làm đẹp, 
+17: Entertainment/Giải trí, 18: Travel/Du lịch, 19: Family Support/Chu cấp, 20: Events & Gifts/Hiếu hỉ, 
+21: Medical/Khám bệnh, 22: Medicine/Thuốc men, 23: Fitness/Tập luyện, 24: Fund/Quỹ, 
+25: Repair/Sửa chữa, 26: Accident/Tai nạn, 27: Fine & Fee/Phí phạt, 28: Rent/Tiền nhà, 
+29: Electricity/Tiền điện, 30: Water/Tiền nước, 31: Education/Học phí, 32: Insurance/Bảo hiểm, 
+33: Installment/Trả góp, 34: Other/Khác
+"""
+
+SYSTEM_PROMPT = f"""
+You are a financial parsing assistant. Parse user text into a RAW JSON object.
+When a user submits a transaction content, your job is to parse them based on the following rules 
+RULES:
+1. ONLY return a single JSON object format and do not tamper it with Markdown. DO NOT include explanations, introduction, or markdown outside the JSON.
+2. Fields: content(str), currency(str), amount(int64), type(str: 'income' or 'expense'), 
+   date(YYYY-MM-DD), master_category_id(int), tags(str), notes(str).
+3. master_category_id: Must match the CATEGORY MAPPING provided below based on the transaction context.
+4. Tags: Must be one of (Personal, Family, Work). Use context to decide.
+5. Content: Clean name (e.g., 'Phở bò', not 'ăn phở bò 50k').
+6. Language/Currency: Use provided context unless user explicitly overrides.
+
+CATEGORY MAPPING:
+{CATEGORY_MAPPING}
+"""
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-async def parse_transaction(user_text: str, user_currency: str = "VND") -> dict:
+async def parse_transaction(user_text: str, user_currency: str = "VND", language_code: str = "vi") -> dict:
     """
     Parse a natural-language transaction description into a structured dict.
-
-    Returns a dict with keys:
-        content, currency, amount, type, date, category, tags, notes,
-        address, wallet, date_time          ← extra keys kept for FinA compat
     """
     now_iso = datetime.now(timezone.utc).isoformat()
+    today_str = date.today().isoformat()
+
 
     if not AI_API_KEY:
         logger.warning("NOVITA_API_KEY not set — using heuristic mock parser")
         return _mock_parse(user_text, user_currency, now_iso)
 
+    # prompt = (
+    #     f"Today's date: {date.today().isoformat()}\n"
+    #     f"User currency: {user_currency}\n"
+    #     f"Language code: {language_code}\n"
+    #     f"Transaction: {user_text}"
+    # )
+    # Tạo prompt chi tiết cho AI
+    # Cung cấp ngữ cảnh ngôn ngữ giúp AI hiểu các từ lóng hoặc tên riêng địa phương tốt hơn
     prompt = (
-        f"Today's date: {date.today().isoformat()}\n"
-        f"User default currency: {user_currency}\n"
-        f"Transaction: {user_text}"
+        f"CONTEXT:\n"
+        f"- Today's date: {today_str}\n"
+        f"- Target Currency: {user_currency}\n"
+        f"- Target Language: {language_code}\n\n"
+        f"USER INPUT:\n"
+        f"'{user_text}'"
     )
 
-    raw = await _call_llm(prompt)
-    return _parse_and_validate(raw, user_currency, now_iso)
+    try:
+        raw = await _call_llm(prompt)
+        # Hàm _parse_and_validate cần được giữ lại để xử lý chuỗi JSON từ AI
+        return _parse_and_validate(raw, user_currency, now_iso)
+    except Exception as e:
+        logger.error(f"Failed to parse transaction: {e}")
+        raise ValueError(f"Failed to parse transaction: {e}") from e
 
 
 # ── LLM call ─────────────────────────────────────────────────────────────────
@@ -96,15 +143,15 @@ async def _call_llm(prompt: str) -> str:
         "Authorization": f"Bearer {AI_API_KEY}",
         "Content-Type": "application/json",
     }
-    print(f"{headers}")
+    # logger.debug(f"Sending request to LLM with headers: {headers}")
     payload = {
         "model": AI_MODEL,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user",   "content": prompt},
         ],
-        "temperature": 0.1,   # near-deterministic for parsing tasks
-        "max_tokens":  400,
+        "temperature": 0.0, # Giảm xuống 0.0 để kết quả trích xuất ổn định nhất
+        "max_tokens": 500,
     }
 
     # print(f"Sending prompt to LLM: {payload}")  # Log the start of the prompt for debugging
@@ -119,9 +166,19 @@ async def _call_llm(prompt: str) -> str:
     # Surface HTTP errors as plain exceptions so the caller can wrap them.
     resp.raise_for_status()
 
-    content = resp.json()["choices"][0]["message"]["content"]
-    logger.debug("Raw LLM response: %s", content)
-    return content
+    logger.debug(f"Received response from LLM: {resp.text}")  # Log the raw response for debugging
+    result = resp.json()
+    content = result["choices"][0]["message"]["content"].strip()
+    
+    # Xử lý trường hợp AI trả về markdown code block
+    if content.startswith("```"):
+        content = content.split("```")[1]
+        if content.startswith("json"):
+            content = content[4:]
+    
+    logger.debug(f"Extracted content after stripping markdown: {content}")  # Log the cleaned content for debugging
+    
+    return content.strip()
 
 
 # ── JSON extraction & validation ──────────────────────────────────────────────
@@ -139,11 +196,6 @@ def _strip_markdown(text: str) -> str:
 
 
 def _parse_and_validate(raw: str, default_currency: str, now_iso: str) -> dict:
-    """
-    1. Strip markdown fences.
-    2. Parse JSON.
-    3. Normalise / fill-in-default every field.
-    """
     clean = _strip_markdown(raw)
 
     try:
@@ -185,9 +237,15 @@ def _parse_and_validate(raw: str, default_currency: str, now_iso: str) -> dict:
             parsed_date = None
 
     # category
-    category = str(data.get("category") or "Others").strip()
-    if category not in VALID_CATEGORIES:
-        category = "Others"
+    master_category_id = data.get("master_category_id")
+    # try:
+    #     category_id = int(master_category_id)
+    #     if txn_type == "income" and not (1 <= category_id <= 8):
+    #         category_id = 35  # Default to "Other" for income
+    #     elif txn_type == "expense" and not (9 <= category_id <= 34):
+    #         category_id = 34  # Default to "Other" for expense
+    # except (ValueError, TypeError):
+    #     category_id = 35 if txn_type == "income" else 34  # Default to "Other"
 
     # tags — must not be null
     tags = str(data.get("tags") or "Personal").strip()
@@ -213,7 +271,7 @@ def _parse_and_validate(raw: str, default_currency: str, now_iso: str) -> dict:
         "amount":   amount,
         "type":     txn_type,
         "date":     parsed_date,
-        "category": category,
+        "master_category_id": master_category_id,
         "tags":     tags,
         "notes":    notes,
         # Extra fields kept for FinA backend compatibility

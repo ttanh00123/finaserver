@@ -2,7 +2,7 @@
 
 import uuid
 from typing import Optional
-
+from pydantic import BaseModel, Field
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from pydantic import BaseModel
@@ -60,6 +60,9 @@ class TransactionUpdate(BaseModel):
 class PromptRequest(BaseModel):
     text:    str
     user_id: int
+    # Thêm các trường mới với giá trị mặc định
+    currency: Optional[str] = Field(default="VND", description="Loại tiền tệ (VND, USD,...)")
+    language_code: Optional[str] = Field(default="vi", description="Mã ngôn ngữ (vi, en,...)")
 
 class PromptResponse(BaseModel):
     request_id:  str
@@ -266,11 +269,12 @@ async def process_prompt(
     body:    PromptRequest,
     payload: dict = Depends(get_current_user),
 ):
+    # Trong chuẩn RFC 7519 về JSON Web Token, sub đại diện cho chủ thể của token đó.
     uid      = int(payload["sub"])
-    currency = "VND"
-
+    # print(f"Decoded JWT payload: {payload}")
+    
     try:
-        data = await parse_transaction(body.text, currency)
+        data = await parse_transaction(body.text, body.currency, body.language_code)
     except ValueError as e:
         raise HTTPException(422, f"AI returned unparseable output: {e}")
     except httpx.HTTPStatusError as e:
@@ -286,7 +290,7 @@ async def process_prompt(
         data={
             "type":              data.get("type"),
             "amount":            float(data.get("amount", 0)),
-            "currency":          data.get("currency", currency),
+            "currency":          data.get("currency", body.currency),
             "address":           data.get("address") or data.get("content"),
             "wallet":            data.get("wallet", "cash"),
             "date_time":         data.get("date_time"),
