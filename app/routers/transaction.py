@@ -292,7 +292,7 @@ async def process_prompt(
             "amount":            float(data.get("amount", 0)),
             "currency":          data.get("currency", body.currency),
             "address":           data.get("address") or data.get("content"),
-            "wallet":            data.get("wallet", "cash"),
+            # "wallet":            data.get("wallet", "cash"),
             "date_time":         data.get("date_time"),
             "master_category_id": data.get("master_category_id"),
             "content":           data.get("content"),
