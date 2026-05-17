@@ -26,11 +26,6 @@ AI_API_KEY  = os.getenv("AI_API_KEY", "")
 AI_BASE_URL = os.getenv("AI_BASE_URL", "")
 AI_MODEL    = os.getenv("AI_MODEL", "")
 AI_TIMEOUT      = float(os.getenv("AI_TIMEOUT_SECONDS", "25"))
-
-VALID_CATEGORIES = {
-    "Food & Drinks", "Education", "Transportation", "Health",
-    "Entertainment", "Utilities", "Devices", "Others",
-}
 VALID_TAGS  = {"Personal", "Family", "Work"}
 VALID_TYPES = {"income", "expense"}
 
@@ -76,17 +71,38 @@ EXPENSE (type:0):
 33: Installment/Trả góp, 34: Other/Khác
 """
 
+# SYSTEM_PROMPT = f"""
+# You are a financial parsing assistant. Parse user text into a RAW JSON object.
+# When a user submits a transaction content, your job is to parse them based on the following rules 
+# RULES:
+# 1. ONLY return a single JSON object format and do not tamper it with Markdown. DO NOT include explanations, introduction, or markdown outside the JSON.
+# 2. Fields: content(str), currency(str), amount(int64), type(str: 'income' or 'expense'), 
+#    date(YYYY-MM-DD), master_category_id(int), address(str), tags(str), notes(str).
+# 3. master_category_id: Must match the CATEGORY MAPPING provided below based on the transaction context.
+# 4. Tags: Must be one of (Personal, Family, Work). Use context to decide.
+# 5. Content: A short, clean description of what was purchased or done (e.g., 'Ăn trưa phở bò', 'Mua xăng', 'Tiền điện tháng 5'). Keep the meal type (breakfast/lunch/dinner) if mentioned.
+# 6. Address: The specific place/store/location name where the transaction happened (e.g., 'Circle K', 'Vinmart', 'Grab'). Leave empty string if no location is mentioned.
+# 8. Language/Currency: Use provided context unless user explicitly overrides.
+
+# CATEGORY MAPPING:
+# {CATEGORY_MAPPING}
+# """
+
 SYSTEM_PROMPT = f"""
-You are a financial parsing assistant. Parse user text into a RAW JSON object.
-When a user submits a transaction content, your job is to parse them based on the following rules 
-RULES:
-1. ONLY return a single JSON object format and do not tamper it with Markdown. DO NOT include explanations, introduction, or markdown outside the JSON.
-2. Fields: content(str), currency(str), amount(int64), type(str: 'income' or 'expense'), 
-   date(YYYY-MM-DD), master_category_id(int), tags(str), notes(str).
-3. master_category_id: Must match the CATEGORY MAPPING provided below based on the transaction context.
-4. Tags: Must be one of (Personal, Family, Work). Use context to decide.
-5. Content: Clean name (e.g., 'Phở bò', not 'ăn phở bò 50k').
-6. Language/Currency: Use provided context unless user explicitly overrides.
+You are a financial transaction parser. Extract structured data from user input.
+
+OUTPUT: A single raw JSON object. No markdown, no explanation, no extra text.
+
+FIELD DEFINITIONS:
+- content: The ACTION + ITEM only. Remove location, price, and filler words. (e.g. input "Ăn trưa mỳ Ramen ở Go Thăng Long 115k" → content = "Ăn trưa mỳ Ramen")
+- amount: Numeric value only. Convert 'k'=×1000, 'triệu'/'tr'=×1,000,000.
+- currency: From context, default to user's currency setting.
+- type: 'income' or 'expense'.
+- date: YYYY-MM-DD. Use today if not specified.
+- master_category_id: Integer from CATEGORY MAPPING below.
+- address: The PLACE or STORE NAME only. Typically follows keywords 'ở', 'tại', 'at', 'by', 'trên'. Empty string "" if no location mentioned.
+- tags: One of: Personal, Family, Work.
+- notes: Any extra detail not captured above. Empty string "" if none.
 
 CATEGORY MAPPING:
 {CATEGORY_MAPPING}
@@ -153,8 +169,6 @@ async def _call_llm(prompt: str) -> str:
         "temperature": 0.0, # Giảm xuống 0.0 để kết quả trích xuất ổn định nhất
         "max_tokens": 500,
     }
-
-    # print(f"Sending prompt to LLM: {payload}")  # Log the start of the prompt for debugging
 
     async with httpx.AsyncClient(timeout=AI_TIMEOUT) as client:
         resp = await client.post(
@@ -258,6 +272,16 @@ def _parse_and_validate(raw: str, default_currency: str, now_iso: str) -> dict:
     if notes_raw and str(notes_raw).lower() not in ("null", "none", ""):
         notes = str(notes_raw).strip()
 
+    # address — best effort to extract from content if not provided
+    address = str(data.get("address") or "").strip()
+    if not address:
+        # Heuristic: look for keywords like 'ở', 'tại', 'at', 'by', 'trên' followed by a place name
+        m = re.search(r"(?:ở|tại|at|by|trên)\s+([^\d,]+)", content, flags=re.IGNORECASE)
+        if m:
+            address = m.group(1).strip()
+            # Remove the address part from content to keep it clean
+            content = re.sub(r"(?:ở|tại|at|by|trên)\s+[^\d,]+", "", content, flags=re.IGNORECASE).strip()
+    
     # Build date_time for FinA compatibility (ISO8601)
     if parsed_date:
         date_time = f"{parsed_date}T00:00:00Z"
@@ -275,7 +299,7 @@ def _parse_and_validate(raw: str, default_currency: str, now_iso: str) -> dict:
         "tags":     tags,
         "notes":    notes,
         # Extra fields kept for FinA backend compatibility
-        "address":   content,      # best approximation without address field
+        "address":   address,      # best approximation without address field
         "wallet":    "cash",
         "date_time": date_time,
     }
