@@ -70,9 +70,21 @@ class WalletRepository:
     def get_by_user(user_id: int) -> list[dict]:
         return Database.fetch_all(
             """
-            SELECT * FROM wallets
-            WHERE userid = %s AND status = 1
-            ORDER BY sort_order
+            SELECT 
+                w.*,
+                -- Tính tổng thu nhập tại ví này
+                COALESCE(SUM(CASE WHEN t.type = 1 AND t.wallet_id = w.id THEN CAST(t.amount AS DECIMAL(15,2)) ELSE 0 END), 0)
+                -- Cộng với tổng tiền được chuyển từ ví khác đến ví này
+                + COALESCE(SUM(CASE WHEN t.to_wallet_id = w.id THEN CAST(t.amount AS DECIMAL(15,2)) ELSE 0 END), 0)
+                -- Trừ đi tổng chi tiêu tại ví này
+                - COALESCE(SUM(CASE WHEN t.type = 0 AND t.wallet_id = w.id THEN CAST(t.amount AS DECIMAL(15,2)) ELSE 0 END), 0)
+                AS balance
+            FROM wallets w
+            LEFT JOIN transactions t 
+                ON w.id = t.wallet_id OR w.id = t.to_wallet_id
+            WHERE w.userid = %s AND w.status = 1
+            GROUP BY w.id
+            ORDER BY w.sort_order;
             """,
             (user_id,),
         )
