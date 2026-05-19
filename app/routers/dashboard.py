@@ -6,8 +6,14 @@
 CREATE OR REPLACE VIEW v_user_balance AS
 SELECT
     w.userid,
-    SUM(w.balance) AS total_balance,
-    w.currency
+    w.currency,
+    -- Số dư ban đầu của ví + Thu nhập + Tiền nhận chuyển khoản - Chi tiêu
+    SUM(
+        COALESCE(w.balance, 0) -- Giả định w.balance lưu số dư ban đầu lúc tạo ví
+        + COALESCE((SELECT SUM(CAST(t.amount AS DECIMAL(15,2))) FROM transactions t WHERE t.wallet_id = w.id AND t.type = 1 AND t.status = 0), 0)
+        + COALESCE((SELECT SUM(CAST(t.amount AS DECIMAL(15,2))) FROM transactions t WHERE t.to_wallet_id = w.id AND t.status = 0), 0)
+        - COALESCE((SELECT SUM(CAST(t.amount AS DECIMAL(15,2))) FROM transactions t WHERE t.wallet_id = w.id AND t.type = 0 AND t.status = 0), 0)
+    ) AS total_balance
 FROM wallets w
 WHERE w.status = 1
 GROUP BY w.userid, w.currency;
@@ -48,52 +54,35 @@ async def get_summary(
     period: str = Query(default="month", regex="^(year|quarter|month)$"),
     user_id: int = Depends(get_current_user_id),
 ):
-    """
-    Trả về:
-    - total_balance: tổng số dư tất cả ví (theo từng currency)
-    - income: tổng thu của kỳ (không tính transfer)
-    - expense: tổng chi của kỳ (không tính transfer)
-    - recent_transactions: 10 giao dịch mới nhất
-    """
     now = datetime.now()
 
-    # ── Total balance từ View ──────────────────────────────────────────────────
+    # ── Total balance từ View mới (Đã tính toán động) ──────────────────────────
     balance_rows = Database.fetch_all(
         "SELECT total_balance, currency FROM v_user_balance WHERE userid = %s",
         (user_id,),
     )
 
-    # ── Income / Expense theo period ───────────────────────────────────────────
+    # ── Xác định điều kiện lọc theo period ──────────────────────────────────────
     if period == "year":
         where_period = "year = %s"
-        period_param = str(now.year)
+        period_params = (str(now.year),)
     elif period == "quarter":
         where_period = "year = %s AND quarter = %s"
-        period_param = (str(now.year), str((now.month - 1) // 3 + 1))
+        period_params = (str(now.year), str((now.month - 1) // 3 + 1))
     else:  # month
         where_period = "month = %s"
-        period_param = now.strftime("%Y-%m")
+        period_params = (now.strftime("%Y-%m"),)
 
-    if period == "quarter":
-        summary_rows = Database.fetch_all(
-            f"""
-            SELECT type, currency, SUM(total) AS total
-            FROM v_transaction_summary
-            WHERE userid = %s AND {where_period}
-            GROUP BY type, currency
-            """,
-            (user_id, *period_param),
-        )
-    else:
-        summary_rows = Database.fetch_all(
-            f"""
-            SELECT type, currency, SUM(total) AS total
-            FROM v_transaction_summary
-            WHERE userid = %s AND {where_period}
-            GROUP BY type, currency
-            """,
-            (user_id, period_param),
-        )
+    # ── Lấy dữ liệu summary thu/chi ───────────────────────────────────────────
+    summary_rows = Database.fetch_all(
+        f"""
+        SELECT type, currency, SUM(total) AS total
+        FROM v_transaction_summary
+        WHERE userid = %s AND {where_period}
+        GROUP BY type, currency
+        """,
+        (user_id, *period_params),
+    )
 
     # ── Recent transactions ────────────────────────────────────────────────────
     recent = Database.fetch_all(
@@ -114,9 +103,17 @@ async def get_summary(
         (user_id,),
     )
 
-    # ── Serialize ──────────────────────────────────────────────────────────────
-    income  = {r["currency"]: float(r["total"]) for r in summary_rows if r["type"] == 1}
-    expense = {r["currency"]: float(r["total"]) for r in summary_rows if r["type"] == 0}
+    # ── Serialize dữ liệu an toàn cho đa tiền tệ ────────────────────────────────
+    income = {}
+    expense = {}
+    
+    for r in summary_rows:
+        curr = r["currency"]
+        val = float(r["total"])
+        if r["type"] == 1:
+            income[curr] = val
+        elif r["type"] == 0:
+            expense[curr] = val
 
     return {
         "period": period,
@@ -124,8 +121,8 @@ async def get_summary(
             {"currency": r["currency"], "amount": float(r["total_balance"])}
             for r in balance_rows
         ],
-        "income":  income,   # { "VND": 5000000, "SGD": 1000 }
-        "expense": expense,
+        "income":  income,   # Trả về đúng format: { "VND": 5000000.0 }
+        "expense": expense,  # Trả về đúng format: { "VND": 3080000.0 }
         "recent_transactions": [
             {
                 "id":           r["id"],
