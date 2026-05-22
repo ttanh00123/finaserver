@@ -189,6 +189,7 @@ async def get_transaction(
         """
         SELECT
             t.id, t.type, t.wallet_id, t.to_wallet_id,
+            '' as category_name, c.id as category_id,
             t.amount, t.receive_amount, t.currency,
             t.category_id, t.content, t.notes,
             t.date_time, t.tags, t.status,
@@ -196,6 +197,7 @@ async def get_transaction(
             w.wallet_type
         FROM transactions t
         LEFT JOIN wallets w ON t.wallet_id = w.id
+        LEFT JOIN master_categories c ON t.category_id = c.id
         WHERE t.id = %s AND t.userid = %s
         """,
         (tx_id, user_id),
@@ -313,7 +315,10 @@ def _serialize_transaction(r):
         "currency": r["currency"],
 
         "category": r["category_name"],
+        "category_id": r["category_id"],
+
         "wallet": r["wallet_name"],
+        "wallet_id": r["wallet_id"],
 
         "address": r["content"],
         "note": r["notes"],
