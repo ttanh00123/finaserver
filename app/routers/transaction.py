@@ -309,7 +309,7 @@ async def process_prompt(
 def _serialize_transaction(r):
     return {
         "id": r["id"],
-        "type": "expense" if r["type"] == 0 else "income",
+        "type": r["type"],
 
         "amount": float(r["amount"]),
         "currency": r["currency"],
