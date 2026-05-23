@@ -100,7 +100,7 @@ FIELD DEFINITIONS:
 - type: 'income' or 'expense'.
 - date: YYYY-MM-DD. Use today if not specified.
 - master_category_id: Integer from CATEGORY MAPPING below.
-- address: The PLACE or STORE NAME only. Typically follows keywords 'ở', 'tại', 'at', 'by', 'trên'. Empty string "" if no location mentioned.
+- content: The ACTION + ITEM only. Remove location, price, and filler words. (e.g. input "Ăn trưa mỳ Ramen ở Go Thăng Long 115k" → content = "Ăn trưa mỳ Ramen")
 - tags: One of: Personal, Family, Work.
 - notes: Any extra detail not captured above. Empty string "" if none.
 
@@ -272,14 +272,14 @@ def _parse_and_validate(raw: str, default_currency: str, now_iso: str) -> dict:
     if notes_raw and str(notes_raw).lower() not in ("null", "none", ""):
         notes = str(notes_raw).strip()
 
-    # address — best effort to extract from content if not provided
-    address = str(data.get("address") or "").strip()
-    if not address:
+    # content — best effort to extract from text if not provided
+    content = str(data.get("content") or "").strip()
+    if not content:
         # Heuristic: look for keywords like 'ở', 'tại', 'at', 'by', 'trên' followed by a place name
         m = re.search(r"(?:ở|tại|at|by|trên)\s+([^\d,]+)", content, flags=re.IGNORECASE)
         if m:
-            address = m.group(1).strip()
-            # Remove the address part from content to keep it clean
+            content = m.group(1).strip()
+            # Remove the content part from content to keep it clean
             content = re.sub(r"(?:ở|tại|at|by|trên)\s+[^\d,]+", "", content, flags=re.IGNORECASE).strip()
     
     # Build date_time for FinA compatibility (ISO8601)
@@ -299,7 +299,7 @@ def _parse_and_validate(raw: str, default_currency: str, now_iso: str) -> dict:
         "tags":     tags,
         "notes":    notes,
         # Extra fields kept for FinA backend compatibility
-        "address":   address,      # best approximation without address field
+        "content":   content,      # best approximation without content field
         "wallet":    "cash",
         "date_time": date_time,
     }
@@ -351,7 +351,7 @@ def _mock_parse(text: str, currency: str, now_iso: str) -> dict:
         "category":  category,
         "tags":      tags,
         "notes":     None,
-        "address":   content,
+        "content":   content,
         "wallet":    "cash",
         "date_time": now_iso,
     }

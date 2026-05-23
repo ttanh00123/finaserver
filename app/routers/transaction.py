@@ -37,7 +37,7 @@ class TransactionCreate(BaseModel):
     to_wallet_id:    Optional[int]  = None
     receive_amount:  Optional[float] = None
     category_id:     Optional[int]  = None
-    address:         Optional[str]  = None
+    content:         Optional[str]  = None
     note:            Optional[str]  = None
     date_time:       Optional[str]  = None
     tags:            Optional[str]  = None
@@ -52,7 +52,7 @@ class TransactionUpdate(BaseModel):
     to_wallet_id:   Optional[int]   = None
     receive_amount: Optional[float] = None
     category_id:    Optional[int]   = None
-    address:        Optional[str]   = None
+    content:        Optional[str]   = None
     note:           Optional[str]   = None
     date_time:      Optional[str]   = None
     tags:           Optional[str]   = None
@@ -97,7 +97,7 @@ async def create_transaction(
             body.receive_amount,
             body.currency,
             body.category_id,
-            body.address,       # lưu vào content
+            body.content,       # lưu vào content
             body.note,
             date_time,
             body.tags,
@@ -231,7 +231,7 @@ async def update_transaction(
     if body.to_wallet_id   is not None: updates["to_wallet_id"]   = body.to_wallet_id
     if body.receive_amount is not None: updates["receive_amount"] = body.receive_amount
     if body.category_id    is not None: updates["category_id"]    = body.category_id
-    if body.address        is not None: updates["content"]        = body.address
+    if body.content        is not None: updates["content"]        = body.content
     if body.note           is not None: updates["notes"]          = body.note
     if body.date_time      is not None: updates["date_time"]      = body.date_time
     if body.tags           is not None: updates["tags"]           = body.tags
@@ -293,7 +293,7 @@ async def process_prompt(
             "type":              data.get("type"),
             "amount":            float(data.get("amount", 0)),
             "currency":          data.get("currency", body.currency),
-            "address":           data.get("address") or data.get("content"),
+            "content":           data.get("content"),
             # "wallet":            data.get("wallet", "cash"),
             "date_time":         data.get("date_time"),
             "master_category_id": data.get("master_category_id"),
@@ -320,7 +320,7 @@ def _serialize_transaction(r):
         "wallet": r["wallet_name"],
         "wallet_id": r["wallet_id"],
 
-        "address": r["content"],
+        "content": r["content"],
         "note": r["notes"],
 
         "date_time": r["date_time"].isoformat(),
