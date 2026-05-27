@@ -12,6 +12,7 @@ from app.db.database import Database
 from app.middleware.auth import get_current_user_id, decode_access_token
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from app.services.common_service import _recalculate_balance
 from app.utils.convert import _parse_dt
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
@@ -111,10 +112,13 @@ async def create_transaction(
     #     BillService.move_to_permanent(tx_id, user_id, body.temp_bill_keys)
 
     # Cập nhật balance ví
-    _update_wallet_balance(body.wallet_id, body.amount, body.type)
-    if body.type == 2 and body.to_wallet_id:  # transfer
-        receive = body.receive_amount or body.amount
-        _update_wallet_balance(body.to_wallet_id, receive, income=True)
+    # _update_wallet_balance(body.wallet_id, body.amount, body.type)
+    # if body.type == 2 and body.to_wallet_id:  # transfer
+    #     receive = body.receive_amount or body.amount
+    #     _update_wallet_balance(body.to_wallet_id, receive, income=True)
+
+    # Gọi stored procedure recalc toàn bộ wallet balance
+    _recalculate_balance()
 
     return {"id": tx_id, "status": "created"}
 
@@ -211,6 +215,46 @@ async def get_transaction(
 
 # ── PUT /transactions/:id ──────────────────────────────────────────────────────
 
+# @router.put("/{tx_id}")
+# async def update_transaction(
+#     tx_id:   int,
+#     body:    TransactionUpdate,
+#     user_id: int = Depends(get_current_user_id),
+# ):
+#     existing = Database.fetch_one(
+#         "SELECT * FROM transactions WHERE id = %s AND userid = %s",
+#         (tx_id, user_id),
+#     )
+#     if not existing:
+#         raise HTTPException(status_code=404, detail="Transaction not found")
+
+#     # Chỉ update các field được truyền (partial update)
+#     updates = {}
+#     if body.type           is not None: updates["type"]           = body.type
+#     if body.wallet_id      is not None: updates["wallet_id"]      = body.wallet_id
+#     if body.amount         is not None: updates["amount"]         = body.amount
+#     if body.currency       is not None: updates["currency"]       = body.currency
+#     if body.to_wallet_id   is not None: updates["to_wallet_id"]   = body.to_wallet_id
+#     if body.receive_amount is not None: updates["receive_amount"] = body.receive_amount
+#     if body.category_id    is not None: updates["category_id"]    = body.category_id
+#     if body.content        is not None: updates["content"]        = body.content
+#     if body.note           is not None: updates["notes"]          = body.note
+#     # if body.date_time      is not None: updates["date_time"]      = body.date_time
+#     if body.date_time is not None: updates["date_time"] = _parse_dt(body.date_time)
+#     if body.tags           is not None: updates["tags"]           = body.tags
+
+#     if not updates:
+#         return {"id": tx_id, "status": "no_changes"}
+
+#     set_clause = ", ".join(f"{k} = %s" for k in updates)
+#     params     = list(updates.values()) + [tx_id, user_id]
+
+#     Database.execute(
+#         f"UPDATE transactions SET {set_clause} WHERE id = %s AND userid = %s",
+#         tuple(params),
+#     )
+#     return {"id": tx_id, "status": "updated"}
+
 @router.put("/{tx_id}")
 async def update_transaction(
     tx_id:   int,
@@ -224,20 +268,28 @@ async def update_transaction(
     if not existing:
         raise HTTPException(status_code=404, detail="Transaction not found")
 
-    # Chỉ update các field được truyền (partial update)
+    FIELD_MAP = {
+        "type":           "type",
+        "wallet_id":      "wallet_id",
+        "amount":         "amount",
+        "currency":       "currency",
+        "to_wallet_id":   "to_wallet_id",
+        "receive_amount": "receive_amount",
+        "category_id":    "category_id",
+        "content":        "content",
+        "note":           "notes",
+        "date_time":      "date_time",
+        "tags":           "tags",
+    }
+
     updates = {}
-    if body.type           is not None: updates["type"]           = body.type
-    if body.wallet_id      is not None: updates["wallet_id"]      = body.wallet_id
-    if body.amount         is not None: updates["amount"]         = body.amount
-    if body.currency       is not None: updates["currency"]       = body.currency
-    if body.to_wallet_id   is not None: updates["to_wallet_id"]   = body.to_wallet_id
-    if body.receive_amount is not None: updates["receive_amount"] = body.receive_amount
-    if body.category_id    is not None: updates["category_id"]    = body.category_id
-    if body.content        is not None: updates["content"]        = body.content
-    if body.note           is not None: updates["notes"]          = body.note
-    # if body.date_time      is not None: updates["date_time"]      = body.date_time
-    if body.date_time is not None: updates["date_time"] = _parse_dt(body.date_time)
-    if body.tags           is not None: updates["tags"]           = body.tags
+    for field, col in FIELD_MAP.items():
+        if field not in body.model_fields_set:
+            continue
+        value = getattr(body, field)
+        if field == "date_time":
+            value = _parse_dt(value)
+        updates[col] = value
 
     if not updates:
         return {"id": tx_id, "status": "no_changes"}
@@ -249,24 +301,100 @@ async def update_transaction(
         f"UPDATE transactions SET {set_clause} WHERE id = %s AND userid = %s",
         tuple(params),
     )
+
+    _recalculate_balance()  # Recalc balance sau khi update
+
     return {"id": tx_id, "status": "updated"}
 
 
 # ── DELETE /transactions/:id ───────────────────────────────────────────────────
 
-@router.delete("/{tx_id}", status_code=204)
+@router.delete("/{tx_id}", status_code=200)
 async def delete_transaction(
     tx_id:   int,
     user_id: int = Depends(get_current_user_id),
 ):
-    affected = Database.execute(
+    existing = Database.fetch_one(
+        "SELECT * FROM transactions WHERE id = %s AND userid = %s",
+        (tx_id, user_id),
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    Database.execute(
         "DELETE FROM transactions WHERE id = %s AND userid = %s",
         (tx_id, user_id),
     )
-    if not affected:
-        raise HTTPException(status_code=404, detail="Transaction not found")
 
+    # Database.execute("CALL sp_recalculate_wallet_balance()")  # ← thay vòng for wallet
+    _recalculate_balance()  # Recalc balance sau khi delete
 
+    return {"id": tx_id, "status": "deleted"}
+
+# @router.delete("/{tx_id}", status_code=200)
+# async def delete_transaction(
+#     tx_id:   int,
+#     user_id: int = Depends(get_current_user_id),
+# ):
+#     # Lấy transaction trước khi xoá để biết wallet nào cần recalc
+#     existing = Database.fetch_one(
+#         "SELECT * FROM transactions WHERE id = %s AND userid = %s",
+#         (tx_id, user_id),
+#     )
+#     if not existing:
+#         raise HTTPException(status_code=404, detail="Transaction not found")
+
+#     # Xoá transaction
+#     Database.execute(
+#         "DELETE FROM transactions WHERE id = %s AND userid = %s",
+#         (tx_id, user_id),
+#     )
+
+#     # Recalculate balance các ví liên quan
+#     affected_wallets = {existing["wallet_id"]}
+#     if existing.get("to_wallet_id"):
+#         affected_wallets.add(existing["to_wallet_id"])
+
+#     for wallet_id in affected_wallets:
+#         _recalculate_balance(wallet_id)
+
+#     return {"id": tx_id, "status": "deleted"}
+
+# def _recalculate_balance(wallet_id: int) -> None:
+#     """
+#     Tính lại balance từ toàn bộ transactions thay vì cộng/trừ delta.
+#     Đảm bảo balance luôn chính xác dù có edit/delete bất kỳ giao dịch nào.
+#     """
+#     row = Database.fetch_one(
+#         """
+#         SELECT
+#             -- Thu nhập vào ví này
+#             COALESCE(SUM(CASE WHEN type = 1 THEN amount ELSE 0 END), 0) AS total_income,
+#             -- Chi ra từ ví này
+#             COALESCE(SUM(CASE WHEN type = 0 THEN amount ELSE 0 END), 0) AS total_expense,
+#             -- Chuyển ra khỏi ví này
+#             COALESCE(SUM(CASE WHEN type = 2 AND wallet_id    = %s THEN amount         ELSE 0 END), 0) AS transfer_out,
+#             -- Nhận vào ví này (từ transfer)
+#             COALESCE(SUM(CASE WHEN type = 2 AND to_wallet_id = %s THEN receive_amount ELSE 0 END), 0) AS transfer_in
+#         FROM transactions
+#         WHERE (wallet_id = %s OR to_wallet_id = %s)
+#           AND status = 0
+#         """,
+#         (wallet_id, wallet_id, wallet_id, wallet_id),
+#     )
+
+#     balance = (
+#         row["total_income"]
+#         - row["total_expense"]
+#         - row["transfer_out"]
+#         + row["transfer_in"]
+#     )
+
+#     Database.execute(
+#         "UPDATE wallets SET balance = %s WHERE id = %s",
+#         (balance, wallet_id),
+#     )
+    
 # ── POST /transactions/prompt (AI parse) ──────────────────────────────────────
 
 @router.post("/prompt")
@@ -333,19 +461,19 @@ def _serialize_transaction(r):
     }
 
 
-def _update_wallet_balance(wallet_id: int, amount: float, type: int = None, income: bool = False):
-    """
-    Cập nhật balance ví sau khi tạo transaction.
-    type: 0=expense, 1=income, 2=transfer
-    """
-    if income or type == 1:
-        Database.execute(
-            "UPDATE wallets SET balance = balance + %s WHERE id = %s",
-            (amount, wallet_id),
-        )
-    elif type == 0:
-        Database.execute(
-            "UPDATE wallets SET balance = balance - %s WHERE id = %s",
-            (amount, wallet_id),
-        )
-    # type==2 (transfer): xử lý ở caller
+# def _update_wallet_balance(wallet_id: int, amount: float, type: int = None, income: bool = False):
+#     """
+#     Cập nhật balance ví sau khi tạo transaction.
+#     type: 0=expense, 1=income, 2=transfer
+#     """
+#     if income or type == 1:
+#         Database.execute(
+#             "UPDATE wallets SET balance = balance + %s WHERE id = %s",
+#             (amount, wallet_id),
+#         )
+#     elif type == 0:
+#         Database.execute(
+#             "UPDATE wallets SET balance = balance - %s WHERE id = %s",
+#             (amount, wallet_id),
+#         )
+#     # type==2 (transfer): xử lý ở caller
