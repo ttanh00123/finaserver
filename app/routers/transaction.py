@@ -12,6 +12,8 @@ from app.db.database import Database
 from app.middleware.auth import get_current_user_id, decode_access_token
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from app.utils.convert import _parse_dt
+
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 bearer_scheme = HTTPBearer()
 
@@ -78,7 +80,7 @@ async def create_transaction(
     user_id: int = Depends(get_current_user_id),
 ):
     # date_time mặc định NOW() nếu không truyền
-    date_time = body.date_time or None
+    date_time = _parse_dt(body.date_time)  # ← convert ở đây
 
     tx_id = Database.execute(
         """
@@ -233,7 +235,8 @@ async def update_transaction(
     if body.category_id    is not None: updates["category_id"]    = body.category_id
     if body.content        is not None: updates["content"]        = body.content
     if body.note           is not None: updates["notes"]          = body.note
-    if body.date_time      is not None: updates["date_time"]      = body.date_time
+    # if body.date_time      is not None: updates["date_time"]      = body.date_time
+    if body.date_time is not None: updates["date_time"] = _parse_dt(body.date_time)
     if body.tags           is not None: updates["tags"]           = body.tags
 
     if not updates:
