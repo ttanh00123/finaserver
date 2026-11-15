@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from huggingface_hub import InferenceClient
 from pydantic import BaseModel
@@ -40,6 +41,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+parser_rules_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "parser_rules"))
+if os.path.exists(parser_rules_dir):
+    app.mount("/parser-rules", StaticFiles(directory=parser_rules_dir), name="parser_rules")
 
 # ── Routers ────────────────────────────────────────────────────────────────────
 
