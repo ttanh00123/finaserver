@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import date
 from openai import OpenAI
-from categories import EXPENSE, INCOME, FALLBACK
+from app.categories import EXPENSE, INCOME, FALLBACK
 
 from app.db.database import Database
 from app.routers.auth import router as auth_router
@@ -183,6 +183,8 @@ def build_prompt(kind: str) -> str:
         "Rules:\n"
         "- Reply with ONLY the category id number, nothing else.\n"
         "- Dishes, drinks and snack names from any country are Food & Drink.\n"
+        "- You should equip yourself with contextual knowledge of a Vietnamese and a Singaporean to identify common terms.\n"
+        "- Hints for categories are provided as suggestions, not fixed boundaries. Infer the meaning of words that do not appear in the list. (e.g lessons is synonymous to tuition, groceries is synonymous to food)\n"
         "- Use the Other id only if no category fits.\n"
         f"Examples:\n{examples}"
     )
@@ -195,7 +197,7 @@ def categorize(req: Req):
     valid = set(INCOME if kind == "income" else EXPENSE)
 
     res = client.chat.completions.create(
-        model="meta-llama/llama-3.2-3b-instruct:novita",
+        model="meta-llama/Llama-3.2-3B-Instruct",
         messages=[
             {"role": "system", "content": PROMPTS[kind]},
             {"role": "user", "content": req.text},
